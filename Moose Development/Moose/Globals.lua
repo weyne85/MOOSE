@@ -11,7 +11,7 @@ _SCHEDULEDISPATCHER = SCHEDULEDISPATCHER:New() -- Core.ScheduleDispatcher#SCHEDU
 _DATABASE = DATABASE:New() -- Core.Database#DATABASE
 
 --- Settings
-_SETTINGS = SETTINGS:Set()
+_SETTINGS = SETTINGS:Set() -- Core.Settings#SETTINGS
 _SETTINGS:SetPlayerMenuOn()
 
 --- Register cargos.

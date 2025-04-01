@@ -56,6 +56,8 @@ BIGSMOKEPRESET = {
 -- @field #string Falklands South Atlantic map.
 -- @field #string Sinai Sinai map.
 -- @field #string Kola Kola map.
+-- @field #string Afghanistan Afghanistan map
+-- @field #string Iraq Iraq map
 DCSMAP = {
   Caucasus="Caucasus",
   NTTR="Nevada",
@@ -68,6 +70,7 @@ DCSMAP = {
   Sinai="SinaiMap",
   Kola="Kola",
   Afghanistan="Afghanistan",
+  Iraq="Iraq"
 }
 
 
@@ -511,7 +514,7 @@ function UTILS.PrintTableToLog(table, indent, noprint)
         env.info(string.rep("  ", indent) .. tostring(k) .. " = {")
       end
       text = text ..string.rep("  ", indent) .. tostring(k) .. " = {\n"
-      text = text .. tostring(UTILS.PrintTableToLog(v, indent + 1)).."\n"
+      text = text .. tostring(UTILS.PrintTableToLog(v, indent + 1), noprint).."\n"
       if not noprint then
         env.info(string.rep("  ", indent) .. "},")
       end
@@ -1786,6 +1789,8 @@ function UTILS.GetMagneticDeclination(map)
     declination=15
   elseif map==DCSMAP.Afghanistan then
     declination=3
+  elseif map==DCSMAP.Iraq then
+    declination=4.4
   else
     declination=0
   end
@@ -2523,7 +2528,7 @@ end
 --- Function to save an object to a file
 -- @param #string Path The path to use. Use double backslashes \\\\ on Windows filesystems.
 -- @param #string Filename The name of the file. Existing file will be overwritten.
--- @param #table Data The LUA data structure to save. This will be e.g. a table of text lines with an \\n at the end of each line.
+-- @param #string Data The data structure to save. This will be e.g. a string of text lines with an \\n at the end of each line.
 -- @return #boolean outcome True if saving is possible, else false.
 function UTILS.SaveToFile(Path,Filename,Data)
   -- Thanks to @FunkyFranky
@@ -4198,4 +4203,199 @@ function UTILS.SpawnFARPAndFunctionalStatics(Name,Coordinate,FARPType,Coalition,
   end
   
   return ReturnObjects, ADFName
+end
+
+--- Converts a Vec2 to a Vec3.
+-- @param vec the 2D vector
+-- @param y optional new y axis (altitude) value. If omitted it's 0.
+function UTILS.Vec2toVec3(vec,y) 
+  if not vec.z then
+    if vec.alt and not y then
+      y = vec.alt
+    elseif not y then
+      y = 0
+    end
+    return {x = vec.x, y = y, z = vec.y}
+  else
+    return {x = vec.x, y = vec.y, z = vec.z}  -- it was already Vec3, actually.
+  end
+end
+
+--- Get the correction needed for true north in radians
+-- @param gPoint The map point vec2 or vec3
+-- @return number correction
+function UTILS.GetNorthCorrection(gPoint)  
+  local point = UTILS.DeepCopy(gPoint)
+  if not point.z then --Vec2; convert to Vec3
+    point.z = point.y
+    point.y = 0
+  end
+  local lat, lon = coord.LOtoLL(point)
+  local north_posit = coord.LLtoLO(lat + 1, lon)
+  return math.atan2(north_posit.z - point.z, north_posit.x - point.x)
+end
+
+--- Convert time in seconds to a DHMS table `{d = days, h = hours, m = minutes, s = seconds}`
+-- @param timeInSec Time in Seconds
+-- @return #table Table with DHMS data
+function UTILS.GetDHMS(timeInSec)
+  if timeInSec and type(timeInSec) == 'number' then
+    local tbl = {d = 0, h = 0, m = 0, s = 0}
+    if timeInSec > 86400 then
+      while timeInSec > 86400 do
+        tbl.d = tbl.d + 1
+        timeInSec = timeInSec - 86400
+      end
+    end
+    if timeInSec > 3600 then
+      while timeInSec > 3600 do
+        tbl.h = tbl.h + 1
+        timeInSec = timeInSec - 3600
+      end
+    end
+    if timeInSec > 60 then
+      while timeInSec > 60 do
+        tbl.m = tbl.m + 1
+        timeInSec = timeInSec - 60
+      end
+    end
+    tbl.s = timeInSec
+    return tbl
+  else
+    BASE:E("No number handed!")
+    return
+  end
+end
+
+--- Returns heading-error corrected direction in radians.
+-- True-north corrected direction from point along vector vec.
+-- @param vec Vec3 Starting point
+-- @param point Vec2 Direction
+-- @return direction corrected direction from point.
+function UTILS.GetDirectionRadians(vec, point)
+  local dir = math.atan2(vec.z, vec.x)
+  if point then
+    dir = dir + UTILS.GetNorthCorrection(point)
+  end
+  if dir < 0 then
+    dir = dir + 2 * math.pi -- put dir in range of 0 to 2*pi
+  end
+  return dir
+end
+
+--- Raycasting a point in polygon. Code from http://softsurfer.com/Archive/algorithm_0103/algorithm_0103.htm
+-- @param point Vec2 or Vec3 to test
+-- @param #table poly Polygon Table of Vec2/3 point forming the Polygon
+-- @param #number maxalt Altitude limit (optional)
+-- @param #boolean outcome 
+function UTILS.IsPointInPolygon(point, poly, maxalt) 
+  point = UTILS.Vec2toVec3(point)
+  local px = point.x
+  local pz = point.z
+  local cn = 0
+  local newpoly = UTILS.DeepCopy(poly)
+
+  if not maxalt or (point.y <= maxalt) then
+    local polysize = #newpoly
+    newpoly[#newpoly + 1] = newpoly[1]
+
+    newpoly[1] = UTILS.Vec2toVec3(newpoly[1])
+
+    for k = 1, polysize do
+      newpoly[k+1] = UTILS.Vec2toVec3(newpoly[k+1])
+      if ((newpoly[k].z <= pz) and (newpoly[k+1].z > pz)) or ((newpoly[k].z > pz) and (newpoly[k+1].z <= pz)) then
+        local vt = (pz - newpoly[k].z) / (newpoly[k+1].z - newpoly[k].z)
+        if (px < newpoly[k].x + vt*(newpoly[k+1].x - newpoly[k].x)) then
+          cn = cn + 1
+        end
+      end
+    end
+
+    return cn%2 == 1
+  else
+    return false
+  end
+end
+
+--- Vector scalar multiplication.
+-- @param vec Vec3 vector to multiply
+-- @param #number mult scalar multiplicator
+-- @return Vec3 new vector multiplied with the given scalar
+function UTILS.ScalarMult(vec, mult)
+  return {x = vec.x*mult, y = vec.y*mult, z = vec.z*mult}
+end
+
+--- Utilities weather class for fog mainly.
+-- @type UTILS.Weather
+UTILS.Weather = {}
+
+--- Returns the current fog thickness in meters. Returns zero if fog is not present. 
+function UTILS.Weather.GetFogThickness()
+  return world.weather.getFogThickness()
+end
+
+--- Sets the fog to the desired thickness in meters at sea level. 
+-- @param #number Thickness Thickness in meters.
+-- Any fog animation will be discarded.
+-- Valid range : 100 to 5000 meters
+function UTILS.Weather.SetFogThickness(Thickness)
+  local value = Thickness
+  if value < 100 then value = 100
+  elseif value > 5000 then  value = 5000 end
+  return world.weather.setFogThickness(value)
+end
+
+--- Removes the fog.
+function UTILS.Weather.RemoveFog()
+  return world.weather.setFogThickness(0)
+end
+
+--- Gets the maximum visibility distance of the current fog setting.
+-- Returns 0 if no fog is present. 
+function UTILS.Weather.GetFogVisibilityDistanceMax()
+  return world.weather.getFogVisibilityDistance()
+end
+
+--- Sets the maximum visibility at sea level in meters.
+-- @param #number Thickness Thickness in meters.
+-- Limit: 100 to 100000 
+function UTILS.Weather.SetFogVisibilityDistance(Thickness)
+  local value = Thickness
+  if value < 100 then value = 100
+  elseif value > 100000 then  value = 100000 end
+  return world.weather.setFogVisibilityDistance(value)
+end
+
+---  Uses data from the passed table to change the fog visibility and thickness over a desired timeframe. This allows for a gradual increase/decrease of fog values rather than abruptly applying the values.
+-- Animation Key Format: {time, visibility, thickness}
+-- @param #table AnimationKeys Table of AnimationKey tables
+-- @usage
+-- Time: in seconds 0 to infinity
+-- Time is relative to when the function was called. Time value for each key must be larger than the previous key. If time is set to 0 then the fog will be applied to the corresponding visibility and thickness values at that key. Any time value greater than 0 will result in the current fog being inherited and changed to the first key.
+-- Visibility: in meters 100 to 100000
+-- Thickness: in meters 100 to 5000
+-- The speed at which the visibility and thickness changes is based on the time between keys and the values that visibility and thickness are being set to.
+--
+-- When the function is passed an empty table {} or nil the fog animation will be discarded and whatever the current thickness and visibility are set to will remain.
+-- 
+-- The following will set the fog in the mission to disappear in 1 minute.
+--
+--            UTILS.Weather.SetFogAnimation({ {60, 0, 0} })
+--
+-- The following will take 1 hour to get to the first fog setting, it will maintain that fog setting for another hour, then lightly removes the fog over the 2nd and 3rd hour, the completely removes the fog after 3 hours and 3 minutes from when the function was called.
+--
+--            UTILS.Weather.SetFogAnimation({
+--              {3600, 10000, 3000},    -- one hour to get to that fog setting
+--              {7200, 10000, 3000},    -- will maintain for 2 hours
+--              {10800, 20000, 2000},   -- at 3 hours visibility will have been increased while thickness decreases slightly
+--              {12600, 0, 0},          -- at 3:30 after the function was called the fog will be completely removed. 
+--            })
+--  
+function UTILS.Weather.SetFogAnimation(AnimationKeys)
+  return world.weather.setFogAnimation(AnimationKeys)
+end
+
+--- The fog animation will be discarded and whatever the current thickness and visibility are set to will remain
+function UTILS.Weather.StopFogAnimation()
+  return world.weather.setFogAnimation({})
 end

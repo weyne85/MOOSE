@@ -6047,7 +6047,7 @@ function WAREHOUSE:_SpawnAssetAircraft(alias, asset, request, parking, uncontrol
 
     else
 
-      if #parking<#template.units and not airstart then
+      if parking and #parking<#template.units and not airstart then
         local text=string.format("ERROR: Not enough parking! Free parking = %d < %d aircraft to be spawned.", #parking, #template.units)
         self:_DebugMessage(text)
         return nil
@@ -6089,7 +6089,7 @@ function WAREHOUSE:_SpawnAssetAircraft(alias, asset, request, parking, uncontrol
           terminal=parking[i].TerminalID
         end
 
-        if self.Debug then
+        if self.Debug and terminal then
           local text=string.format("Spawnplace unit %s terminal %d.", unit.name, terminal)
           coord:MarkToAll(text)
           env.info(text)
@@ -8122,9 +8122,11 @@ function WAREHOUSE:_FindParkingForAssets(airbase, assets)
               -- Debug output for occupied spots.            
               if self.Debug then
                 local coord=problem.coord --Core.Point#COORDINATE
-                local text=string.format("Obstacle %s [type=%s] blocking spot=%d! Size=%.1f m and distance=%.1f m.", problem.name, problem.type, _termid, problem.size, problem.dist)
-                self:I(self.lid..text)
-                coord:MarkToAll(string.format(text))
+                if coord then
+                    local text=string.format("Obstacle %s [type=%s] blocking spot=%d! Size=%.1f m and distance=%.1f m.", problem.name, problem.type, _termid, problem.size, problem.dist)
+                    self:I(self.lid..text)
+                    coord:MarkToAll(text)
+                end
               else
                 self:T(self.lid..string.format("Parking spot %d is occupied or not big enough!", _termid))
               end
@@ -8595,7 +8597,6 @@ end
 -- @param #WAREHOUSE.Queueitem qitem Item of queue to be removed.
 -- @param #table queue The queue from which the item should be deleted.
 function WAREHOUSE:_DeleteQueueItem(qitem, queue)
-  self:F({qitem=qitem, queue=queue})
 
   for i=1,#queue do
     local _item=queue[i] --#WAREHOUSE.Queueitem

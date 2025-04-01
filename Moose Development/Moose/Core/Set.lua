@@ -289,7 +289,14 @@ do -- SET_BASE
   
     -- Debug info.
     --self:T2( { ObjectName = ObjectName, Object = Object } )
-
+    
+    -- Error ahndling
+    if not ObjectName or ObjectName == "" then
+      self:E("SET_BASE:Add - Invalid ObjectName handed")
+      self:E({ObjectName=ObjectName, Object=Object})
+      return self
+    end
+    
     -- Ensure that the existing element is removed from the Set before a new one is inserted to the Set
     if self.Set[ObjectName] then
       self:Remove( ObjectName, true )
@@ -524,6 +531,21 @@ do -- SET_BASE
 
     return self.SomeIteratorLimit or self:Count()
   end
+  
+  --- Get max threat level of all objects in the SET.
+  -- @param #SET_BASE self
+  -- @return #number Max threat level found.
+  function SET_BASE:GetThreatLevelMax()
+    local ThreatMax = 0
+    for _,_unit in pairs(self.Set or {}) do
+      local unit = _unit -- Wrapper.Unit#UNIT
+      local threat = unit.GetThreatLevel and unit:GetThreatLevel() or 0
+      if threat > ThreatMax then
+        ThreatMax = threat
+      end
+    end
+    return ThreatMax
+  end
 
   --- Filters for the defined collection.
   -- @param #SET_BASE self
@@ -607,14 +629,14 @@ do -- SET_BASE
     return self
   end
 
-  --- Iterate the SET_BASE while identifying the nearest object in the set from a @{Core.Point#POINT_VEC2}.
+  --- Iterate the SET_BASE while identifying the nearest object in the set from a @{Core.Point#COORDINATE}.
   -- @param #SET_BASE self
-  -- @param Core.Point#POINT_VEC2 PointVec2 A @{Core.Point#COORDINATE} or @{Core.Point#POINT_VEC2} object (but **not** a simple DCS#Vec2!) from where to evaluate the closest object in the set.
+  -- @param Core.Point#COORDINATE Coordinate A @{Core.Point#COORDINATE} object (but **not** a simple DCS#Vec2!) from where to evaluate the closest object in the set.
   -- @return Core.Base#BASE The closest object.
   -- @usage
   --          myset:FindNearestObjectFromPointVec2( ZONE:New("Test Zone"):GetCoordinate() )
-  function SET_BASE:FindNearestObjectFromPointVec2( PointVec2 )
-    --self:F2( PointVec2 )
+  function SET_BASE:FindNearestObjectFromPointVec2( Coordinate )
+    --self:F2( Coordinate )
 
     local NearestObject = nil
     local ClosestDistance = nil
@@ -622,9 +644,9 @@ do -- SET_BASE
     for ObjectID, ObjectData in pairs( self.Set ) do
       if NearestObject == nil then
         NearestObject = ObjectData
-        ClosestDistance = PointVec2:DistanceFromPointVec2( ObjectData:GetCoordinate() )
+        ClosestDistance = Coordinate:DistanceFromPointVec2( ObjectData:GetCoordinate() )
       else
-        local Distance = PointVec2:DistanceFromPointVec2( ObjectData:GetCoordinate() )
+        local Distance = Coordinate:DistanceFromPointVec2( ObjectData:GetCoordinate() )
         if Distance < ClosestDistance then
           NearestObject = ObjectData
           ClosestDistance = Distance
@@ -1220,12 +1242,12 @@ do
     return GroupFound
   end
 
-  --- Iterate the SET_GROUP while identifying the nearest object from a @{Core.Point#POINT_VEC2}.
+  --- Iterate the SET_GROUP while identifying the nearest object from a @{Core.Point#COORDINATE}.
   -- @param #SET_GROUP self
-  -- @param Core.Point#POINT_VEC2 PointVec2 A @{Core.Point#POINT_VEC2} object from where to evaluate the closest object in the set.
+  -- @param Core.Point#COORDINATE Coordinate A @{Core.Point#COORDINATE} object from where to evaluate the closest object in the set.
   -- @return Wrapper.Group#GROUP The closest group.
-  function SET_GROUP:FindNearestGroupFromPointVec2( PointVec2 )
-    --self:F2( PointVec2 )
+  function SET_GROUP:FindNearestGroupFromPointVec2( Coordinate )
+    --self:F2( Coordinate )
 
     local NearestGroup = nil -- Wrapper.Group#GROUP
     local ClosestDistance = nil
@@ -1235,9 +1257,9 @@ do
     for ObjectID, ObjectData in pairs( Set ) do
       if NearestGroup == nil then
         NearestGroup = ObjectData
-        ClosestDistance = PointVec2:DistanceFromPointVec2( ObjectData:GetCoordinate() )
+        ClosestDistance = Coordinate:DistanceFromPointVec2( ObjectData:GetCoordinate() )
       else
-        local Distance = PointVec2:DistanceFromPointVec2( ObjectData:GetCoordinate() )
+        local Distance = Coordinate:DistanceFromPointVec2( ObjectData:GetCoordinate() )
         if Distance < ClosestDistance then
           NearestGroup = ObjectData
           ClosestDistance = Distance
@@ -1538,6 +1560,13 @@ do
         local size = 1
         if Event.IniDCSGroup then
          size = Event.IniDCSGroup:getSize()
+        elseif Event.IniDCSGroupName then
+          local grp = Group.getByName(Event.IniDCSGroupName)
+          if grp then
+            size = grp:getSize()
+          end
+        elseif Object:IsAlive() then
+          size = Object:CountAliveUnits()
         end
         if size == 1 then -- Only remove if the last unit of the group was destroyed.
           self:Remove( ObjectName )
@@ -1709,7 +1738,7 @@ do
 
   --- Iterate the SET_GROUP and return true if all the @{Wrapper.Group#GROUP} are completely in the @{Core.Zone#ZONE}
   -- @param #SET_GROUP self
-  -- @param Core.Zone#ZONE ZoneObject The Zone to be tested for.
+  -- @param Core.Zone#ZONE Zone The Zone to be tested for.
   -- @return #boolean true if all the @{Wrapper.Group#GROUP} are completely in the @{Core.Zone#ZONE}, false otherwise
   -- @usage
   -- local MyZone = ZONE:New("Zone1")
@@ -1756,7 +1785,7 @@ do
 
   --- Iterate the SET_GROUP and return true if at least one of the @{Wrapper.Group#GROUP} is completely inside the @{Core.Zone#ZONE}
   -- @param #SET_GROUP self
-  -- @param Core.Zone#ZONE ZoneObject The Zone to be tested for.
+  -- @param Core.Zone#ZONE Zone The Zone to be tested for.
   -- @return #boolean true if at least one of the @{Wrapper.Group#GROUP} is completely inside the @{Core.Zone#ZONE}, false otherwise.
   -- @usage
   -- local MyZone = ZONE:New("Zone1")
@@ -1781,7 +1810,7 @@ do
 
   --- Iterate the SET_GROUP and return true if at least one @{#UNIT} of one @{Wrapper.Group#GROUP} of the @{#SET_GROUP} is in @{Core.Zone}
   -- @param #SET_GROUP self
-  -- @param Core.Zone#ZONE ZoneObject The Zone to be tested for.
+  -- @param Core.Zone#ZONE Zone The Zone to be tested for.
   -- @return #boolean true if at least one of the @{Wrapper.Group#GROUP} is partly or completely inside the @{Core.Zone#ZONE}, false otherwise.
   -- @usage
   -- local MyZone = ZONE:New("Zone1")
@@ -1807,7 +1836,7 @@ do
   --- Iterate the SET_GROUP and return true if at least one @{Wrapper.Group#GROUP} of the @{#SET_GROUP} is partly in @{Core.Zone}.
   -- Will return false if a @{Wrapper.Group#GROUP} is fully in the @{Core.Zone}
   -- @param #SET_GROUP self
-  -- @param Core.Zone#ZONE ZoneObject The Zone to be tested for.
+  -- @param Core.Zone#ZONE Zone The Zone to be tested for.
   -- @return #boolean true if at least one of the @{Wrapper.Group#GROUP} is partly or completely inside the @{Core.Zone#ZONE}, false otherwise.
   -- @usage
   -- local MyZone = ZONE:New("Zone1")
@@ -1842,7 +1871,7 @@ do
   -- This could also be achieved with `not SET_GROUP:AnyPartlyInZone(Zone)`, but it's easier for the
   -- mission designer to add a dedicated method
   -- @param #SET_GROUP self
-  -- @param Core.Zone#ZONE ZoneObject The Zone to be tested for.
+  -- @param Core.Zone#ZONE Zone The Zone to be tested for.
   -- @return #boolean true if no @{Wrapper.Group#GROUP} is inside the @{Core.Zone#ZONE} in any way, false otherwise.
   -- @usage
   -- local MyZone = ZONE:New("Zone1")
@@ -1869,7 +1898,7 @@ do
   -- That could easily be done with SET_GROUP:ForEachGroupCompletelyInZone(), but this function
   -- provides an easy to use shortcut...
   -- @param #SET_GROUP self
-  -- @param Core.Zone#ZONE ZoneObject The Zone to be tested for.
+  -- @param Core.Zone#ZONE Zone The Zone to be tested for.
   -- @return #number the number of GROUPs completely in the Zone
   -- @usage
   -- local MyZone = ZONE:New("Zone1")
@@ -1891,7 +1920,7 @@ do
 
   --- Iterate the SET_GROUP and count how many UNITs are completely in the Zone
   -- @param #SET_GROUP self
-  -- @param Core.Zone#ZONE ZoneObject The Zone to be tested for.
+  -- @param Core.Zone#ZONE Zone The Zone to be tested for.
   -- @return #number the number of GROUPs completely in the Zone
   -- @usage
   -- local MyZone = ZONE:New("Zone1")
@@ -2706,7 +2735,7 @@ do -- SET_UNIT
 
     --- Check if no element of the SET_UNIT is in the Zone.
     -- @param #SET_UNIT self
-    -- @param Core.Zone#ZONE ZoneObject The Zone to be tested for.
+    -- @param Core.Zone#ZONE Zone The Zone to be tested for.
     -- @return #boolean
     function SET_UNIT:IsNotInZone( Zone )
 
@@ -3746,7 +3775,7 @@ do -- SET_STATIC
 
     --- Check if no element of the SET_STATIC is in the Zone.
     -- @param #SET_STATIC self
-    -- @param Core.Zone#ZONE ZoneObject The Zone to be tested for.
+    -- @param Core.Zone#ZONE Zone The Zone to be tested for.
     -- @return #boolean
     function SET_STATIC:IsNotInZone( Zone )
 
@@ -4582,6 +4611,16 @@ do -- SET_CLIENT
     end
     return self
   end
+  
+  --- Make the SET handle CA slots **only** (GROUND units used by any player). Needs active filtering with `FilterStart()`
+  -- @param #SET_CLIENT self
+  -- @return #SET_CLIENT self
+  function SET_CLIENT:HandleCASlots()
+    self:HandleEvent(EVENTS.PlayerEnterUnit,SET_CLIENT._EventPlayerEnterUnit)
+    self:HandleEvent(EVENTS.PlayerLeaveUnit,SET_CLIENT._EventPlayerLeaveUnit)
+    self:FilterFunction(function(client) if client and client:IsAlive() and client:IsGround() then return true else return false end end)
+    return self
+  end  
 
   --- Handles the Database to check on an event (birth) that the Object was added in the Database.
   -- This is required, because sometimes the _DATABASE birth event gets called later than the SET_BASE birth event!
@@ -5364,6 +5403,7 @@ do -- SET_AIRBASE
     Airbases = {},
     Filter = {
       Coalitions = nil,
+      Zones = nil,
     },
     FilterMeta = {
       Coalitions = {
@@ -5515,6 +5555,31 @@ do -- SET_AIRBASE
     end
     return self
   end
+  
+  --- Builds a set of airbase objects in zones.
+  -- @param #SET_AIRBASE self
+  -- @param #table Zones Table of Core.Zone#ZONE Zone objects, or a Core.Set#SET_ZONE
+  -- @return #SET_AIRBASE self
+  function SET_AIRBASE:FilterZones( Zones )
+    if not self.Filter.Zones then
+      self.Filter.Zones = {}
+    end
+    local zones = {}
+    if Zones.ClassName and Zones.ClassName == "SET_ZONE" then
+      zones = Zones.Set
+    elseif type( Zones ) ~= "table" or (type( Zones ) == "table" and Zones.ClassName ) then
+      self:E("***** FilterZones needs either a table of ZONE Objects or a SET_ZONE as parameter!")
+      return self     
+    else
+      zones = Zones
+    end
+    for _,Zone in pairs( zones ) do
+      local zonename = Zone:GetName()
+      --self:T((zonename)
+      self.Filter.Zones[zonename] = Zone
+    end
+    return self
+  end  
 
   --- Starts the filtering.
   -- @param #SET_AIRBASE self
@@ -5605,14 +5670,14 @@ do -- SET_AIRBASE
     return self
   end
 
-  --- Iterate the SET_AIRBASE while identifying the nearest @{Wrapper.Airbase#AIRBASE} from a @{Core.Point#POINT_VEC2}.
+  --- Iterate the SET_AIRBASE while identifying the nearest @{Wrapper.Airbase#AIRBASE} from a @{Core.Point#COORDINATE}.
   -- @param #SET_AIRBASE self
-  -- @param Core.Point#POINT_VEC2 PointVec2 A @{Core.Point#POINT_VEC2} object from where to evaluate the closest @{Wrapper.Airbase#AIRBASE}.
+  -- @param Core.Point#COORDINATE Coordinate A @{Core.Point#COORDINATE} object from where to evaluate the closest @{Wrapper.Airbase#AIRBASE}.
   -- @return Wrapper.Airbase#AIRBASE The closest @{Wrapper.Airbase#AIRBASE}.
-  function SET_AIRBASE:FindNearestAirbaseFromPointVec2( PointVec2 )
-    --self:F2( PointVec2 )
+  function SET_AIRBASE:FindNearestAirbaseFromPointVec2( Coordinate )
+    --self:F2( Coordinate )
 
-    local NearestAirbase = self:FindNearestObjectFromPointVec2( PointVec2 )
+    local NearestAirbase = self:FindNearestObjectFromPointVec2( Coordinate )
     return NearestAirbase
   end
 
@@ -5653,6 +5718,20 @@ do -- SET_AIRBASE
         --self:T(( { "Evaluated Category", MAirbaseCategory } )
         MAirbaseInclude = MAirbaseInclude and MAirbaseCategory
       end
+      
+      if self.Filter.Zones and MAirbaseInclude then
+        local MAirbaseZone = false
+        for ZoneName, Zone in pairs( self.Filter.Zones ) do
+          --self:T(( "Zone:", ZoneName )
+          local coord = MAirbase:GetCoordinate()
+          if coord and Zone:IsCoordinateInZone(coord) then
+            MAirbaseZone = true
+          end
+          --self:T(( { "Evaluated Zone", MSceneryZone } )
+        end
+        MAirbaseInclude = MAirbaseInclude and MAirbaseZone
+      end      
+      
     end
     
     if self.Filter.Functions and MAirbaseInclude then
@@ -5928,17 +6007,19 @@ do -- SET_CARGO
     return self
   end
 
-  --- (R2.1) Iterate the SET_CARGO while identifying the nearest @{Cargo.Cargo#CARGO} from a @{Core.Point#POINT_VEC2}.
+  --- (R2.1) Iterate the SET_CARGO while identifying the nearest @{Cargo.Cargo#CARGO} from a @{Core.Point#COORDINATE}.
   -- @param #SET_CARGO self
-  -- @param Core.Point#POINT_VEC2 PointVec2 A @{Core.Point#POINT_VEC2} object from where to evaluate the closest @{Cargo.Cargo#CARGO}.
+  -- @param Core.Point#COORDINATE Coordinate A @{Core.Point#COORDINATE} object from where to evaluate the closest @{Cargo.Cargo#CARGO}.
   -- @return Cargo.Cargo#CARGO The closest @{Cargo.Cargo#CARGO}.
-  function SET_CARGO:FindNearestCargoFromPointVec2( PointVec2 ) -- R2.1
-    --self:F2( PointVec2 )
+  function SET_CARGO:FindNearestCargoFromPointVec2( Coordinate ) -- R2.1
+    --self:F2( Coordinate )
 
-    local NearestCargo = self:FindNearestObjectFromPointVec2( PointVec2 )
+    local NearestCargo = self:FindNearestObjectFromPointVec2( Coordinate )
     return NearestCargo
   end
-
+  
+  ---
+  -- @param #SET_CARGO self
   function SET_CARGO:FirstCargoWithState( State )
 
     local FirstCargo = nil
@@ -5953,6 +6034,8 @@ do -- SET_CARGO
     return FirstCargo
   end
 
+  ---
+  -- @param #SET_CARGO self
   function SET_CARGO:FirstCargoWithStateAndNotDeployed( State )
 
     local FirstCargo = nil
@@ -7936,22 +8019,31 @@ do -- SET_OPSGROUP
   --- Handles the OnBirth event for the Set.
   -- @param #SET_OPSGROUP self
   -- @param Core.Event#EVENTDATA Event Event data.
-  function SET_OPSGROUP:_EventOnBirth( Event )
+function SET_OPSGROUP:_EventOnBirth(Event)
     --self:F3( { Event } )
 
     if Event.IniDCSUnit and Event.IniDCSGroup then
-      local DCSgroup=Event.IniDCSGroup --DCS#Group
+        local DCSgroup = Event.IniDCSGroup --DCS#Group
 
-      if DCSgroup:getInitialSize() == DCSgroup:getSize() then -- This seems to be not a good check as even for the first birth event, getSize returns the total number of units in the group.
-
-        local groupname, group = self:AddInDatabase( Event )
-
-        if group and group:CountAliveUnits()==DCSgroup:getInitialSize() then
-          if group and self:IsIncludeObject( group ) then
-            self:Add( groupname, group )
-          end
+        -- group:CountAliveUnits() alternative as this fails for Respawn/Teleport
+        local CountAliveActive = 0
+        for index, data in pairs(DCSgroup:getUnits()) do
+            if data:isExist() and data:isActive() then
+                CountAliveActive = CountAliveActive + 1
+            end
         end
-      end
+
+        if DCSgroup:getInitialSize() == DCSgroup:getSize() then
+
+            local groupname, group = self:AddInDatabase(Event)
+
+            -- group:CountAliveUnits() alternative
+            if group and CountAliveActive == DCSgroup:getInitialSize() then
+                if group and self:IsIncludeObject(group) then
+                    self:Add(groupname, group)
+                end
+            end
+        end
     end
   end
 
@@ -7962,7 +8054,7 @@ do -- SET_OPSGROUP
   function SET_OPSGROUP:_EventOnDeadOrCrash( Event )
     --self:F( { Event } )
 
-    if Event.IniDCSUnit then
+    if Event.IniDCSGroup then
       local ObjectName, Object = self:FindInDatabase( Event )
       if ObjectName then
         if Event.IniDCSGroup:getSize() == 1 then -- Only remove if the last unit of the group was destroyed.

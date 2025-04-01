@@ -757,7 +757,11 @@ end
 -- @param #GROUP self
 -- @return #boolean If true, group is associated with a client or player slot.
 function GROUP:IsPlayer()
-  return self:GetUnit(1):IsPlayer()
+  local unit = self:GetUnit(1)
+  if unit then
+    return unit:IsPlayer()
+  end
+  return false
 end
 
 --- Returns the UNIT wrapper object with number UnitNumber. If it doesn't exist, tries to return the next available unit.
@@ -1175,9 +1179,9 @@ function GROUP:GetAverageVec3()
   end
 end
 
---- Returns a POINT_VEC2 object indicating the point in 2D of the first UNIT of the GROUP within the mission.
+--- Returns a COORDINATE object indicating the point in 2D of the first UNIT of the GROUP within the mission.
 -- @param #GROUP self
--- @return Core.Point#POINT_VEC2 The 2D point vector of the first DCS Unit of the GROUP.
+-- @return Core.Point#COORDINATE The 3D point vector of the first DCS Unit of the GROUP.
 -- @return #nil The first UNIT is not existing or alive.
 function GROUP:GetPointVec2()
   --self:F2(self.GroupName)
@@ -1190,7 +1194,7 @@ function GROUP:GetPointVec2()
     return FirstUnitPointVec2
   end
 
-  BASE:E( { "Cannot GetPointVec2", Group = self, Alive = self:IsAlive() } )
+  BASE:E( { "Cannot get COORDINATE", Group = self, Alive = self:IsAlive() } )
 
   return nil
 end
@@ -1221,7 +1225,17 @@ end
 -- @return Core.Point#COORDINATE The COORDINATE of the GROUP.
 function GROUP:GetCoordinate()
 
-  local Units = self:GetUnits()  or {}
+  -- First try to get the 3D vector of the group. This uses 
+  local vec3=self:GetVec3()
+  local coord
+  if vec3 then
+    coord=COORDINATE:NewFromVec3(vec3)
+    coord.Heading = self:GetHeading() or 0
+    return coord
+  end
+
+  -- No luck try units and add Heading data
+  local Units = self:GetUnits() or {}
 
   for _,_unit in pairs(Units) do
     local FirstUnit = _unit -- Wrapper.Unit#UNIT
@@ -1231,15 +1245,15 @@ function GROUP:GetCoordinate()
       local FirstUnitCoordinate = FirstUnit:GetCoordinate()
 
       if FirstUnitCoordinate then
-        local Heading = self:GetHeading()
+        local Heading = self:GetHeading() or 0
         FirstUnitCoordinate.Heading = Heading
         return FirstUnitCoordinate
       end
 
     end
   end
-  -- no luck, try the API way
   
+  -- no luck, try the API way  
   local DCSGroup = Group.getByName(self.GroupName)
   if DCSGroup then
     local DCSUnits = DCSGroup:getUnits() or {}
@@ -1250,14 +1264,19 @@ function GROUP:GetCoordinate()
         if point then
           --self:I(point)
           local coord = COORDINATE:NewFromVec3(point)
+          coord.Heading = 0
+          local munit = UNIT:Find(_unit)
+          if munit then
+            coord.Heading = munit:GetHeading() or 0
+          end
           return coord
         end
       end
     end
   end
-  
+    
   BASE:E( { "Cannot GetCoordinate", Group = self, Alive = self:IsAlive() } )
-
+  
 end
 
 
@@ -1989,15 +2008,11 @@ end
 --   - @{#GROUP.InitHeight}: Set the height for the units in meters for the respawned group. (This is applicable for air units).
 --   - @{#GROUP.InitRandomizeHeading}: Randomize the headings for the units within the respawned group.
 --   - @{#GROUP.InitZone}: Set the respawn @{Core.Zone} for the respawned group.
---   - @{#GROUP.InitRandomizeZones}: Randomize the respawn @{Core.Zone} between one of the @{Core.Zone}s given for the respawned group.
 --   - @{#GROUP.InitRandomizePositionZone}: Randomize the positions of the units of the respawned group within the @{Core.Zone}.
 --   - @{#GROUP.InitRandomizePositionRadius}: Randomize the positions of the units of the respawned group in a circle band.
---   - @{#GROUP.InitRandomizeTemplates}: Randomize the Template for the respawned group.
---
 --
 -- Notes:
 --
---   - When InitZone or InitRandomizeZones is not used, the position of the respawned group will be its current position.
 --   - The current alive group will always be destroyed and respawned using the template definition.
 --
 -- @param Wrapper.Group#GROUP self
@@ -2019,10 +2034,24 @@ function GROUP:Respawn( Template, Reset )
     end
     return h
   end
+  
+  local function TransFormRoute(Template,OldPos,NewPos)
+    if Template.route and Template.route.points then
+      for _,_point in ipairs(Template.route.points) do
+        --self:I(string.format("Point x = %f Point y = %f",_point.x,_point.y))
+        _point.x = _point.x - OldPos.x + NewPos.x
+        _point.y = _point.y - OldPos.y + NewPos.y
+        --self:I(string.format("Point x = %f Point y = %f",_point.x,_point.y))
+      end
+    end
+    return Template
+  end
 
   -- First check if group is alive.
   if self:IsAlive() then
-
+    
+    local OldPos = self:GetVec2()
+    
     -- Respawn zone.
     local Zone = self.InitRespawnZone -- Core.Zone#ZONE
 
@@ -2035,6 +2064,8 @@ function GROUP:Respawn( Template, Reset )
     -- X, Y
     Template.x = Vec3.x
     Template.y = Vec3.z
+    
+    local NewPos = { x = Vec3.x, y = Vec3.z }
 
     --Template.x = nil
     --Template.y = nil
@@ -2062,7 +2093,7 @@ function GROUP:Respawn( Template, Reset )
               GroupUnitVec3 = Zone:GetRandomVec3()
             else
               if self.InitRespawnRandomizePositionInner and self.InitRespawnRandomizePositionOuter then
-                GroupUnitVec3 = POINT_VEC3:NewFromVec2( From ):GetRandomPointVec3InRadius( self.InitRespawnRandomizePositionsOuter, self.InitRespawnRandomizePositionsInner )
+                GroupUnitVec3 = COORDINATE:NewFromVec3(From):GetRandomVec3InRadius(self.InitRespawnRandomizePositionsOuter, self.InitRespawnRandomizePositionsInner)
               else
                 GroupUnitVec3 = Zone:GetVec3()
               end
@@ -2089,11 +2120,13 @@ function GROUP:Respawn( Template, Reset )
           -- Set heading.
           Template.units[UnitID].heading = _Heading(self.InitRespawnHeading and self.InitRespawnHeading or GroupUnit:GetHeading())
           Template.units[UnitID].psi     = -Template.units[UnitID].heading
-
+          
           -- Debug.
           --self:F( { UnitID, Template.units[UnitID], Template.units[UnitID] } )
         end
       end
+      
+      Template = TransFormRoute(Template,OldPos,NewPos)
 
     elseif Reset==false then  -- Reset=false or nil
 
@@ -2111,7 +2144,7 @@ function GROUP:Respawn( Template, Reset )
             GroupUnitVec3 = Zone:GetRandomVec3()
           else
             if self.InitRespawnRandomizePositionInner and self.InitRespawnRandomizePositionOuter then
-              GroupUnitVec3 = POINT_VEC3:NewFromVec2( From ):GetRandomPointVec3InRadius( self.InitRespawnRandomizePositionsOuter, self.InitRespawnRandomizePositionsInner )
+              GroupUnitVec3 = COORDINATE:NewFromVec2( From ):GetRandomPointVec3InRadius( self.InitRespawnRandomizePositionsOuter, self.InitRespawnRandomizePositionsInner )
             else
               GroupUnitVec3 = Zone:GetVec3()
             end
@@ -2132,11 +2165,13 @@ function GROUP:Respawn( Template, Reset )
 
         -- Heading
         Template.units[UnitID].heading = self.InitRespawnHeading and self.InitRespawnHeading or TemplateUnitData.heading
-
+        
         -- Debug.
         --self:F( { UnitID, Template.units[UnitID], Template.units[UnitID] } )
       end
-
+      
+      Template = TransFormRoute(Template,OldPos,NewPos)
+      
     else
 
       local units=self:GetUnits()
@@ -2185,10 +2220,11 @@ function GROUP:Respawn( Template, Reset )
   -- Destroy old group. Dont trigger any dead/crash events since this is a respawn.
   self:Destroy(false)
 
-  --self:T({Template=Template})
+  --UTILS.PrintTableToLog(Template)
 
   -- Spawn new group.
-  _DATABASE:Spawn(Template)
+  self:ScheduleOnce(0.1,_DATABASE.Spawn,_DATABASE,Template)
+  --_DATABASE:Spawn(Template)
 
   -- Reset events.
   self:ResetEvents()
@@ -2196,6 +2232,29 @@ function GROUP:Respawn( Template, Reset )
   return self
 end
 
+--- Respawn the @{Wrapper.Group} at a @{Core.Point#COORDINATE}.
+-- The method will setup the new group template according the Init(Respawn) settings provided for the group.
+-- These settings can be provided by calling the relevant Init...() methods of the Group prior.
+--
+--   - @{#GROUP.InitHeading}: Set the heading for the units in degrees within the respawned group.
+--   - @{#GROUP.InitHeight}: Set the height for the units in meters for the respawned group. (This is applicable for air units).
+--   - @{#GROUP.InitRandomizeHeading}: Randomize the headings for the units within the respawned group.
+--   - @{#GROUP.InitRandomizePositionZone}: Randomize the positions of the units of the respawned group within the @{Core.Zone}.
+--   - @{#GROUP.InitRandomizePositionRadius}: Randomize the positions of the units of the respawned group in a circle band.
+--
+-- Notes:
+--
+--   - When no coordinate is given, the position of the respawned group will be its current position.
+--   - The current alive group will always be destroyed first.
+--   - The new group will have all of its original units and health restored.
+--
+-- @param Wrapper.Group#GROUP self
+-- @param Core.Point#COORDINATE Coordinate Where to respawn the group. Can be handed as a @{Core.Zone#ZONE_BASE} object.
+-- @return Wrapper.Group#GROUP self
+function GROUP:Teleport(Coordinate)
+  self:InitZone(Coordinate)
+  return self:Respawn(nil,false)
+end
 
 --- Respawn a group at an airbase.
 -- Note that the group has to be on parking spots at the airbase already in order for this to work.
@@ -2337,8 +2396,11 @@ end
 -- @return #table The mission route defined by points.
 function GROUP:GetTaskRoute()
   --self:F2( self.GroupName )
-
-  return UTILS.DeepCopy( _DATABASE.Templates.Groups[self.GroupName].Template.route.points )
+  if _DATABASE.Templates.Groups[self.GroupName].Template and _DATABASE.Templates.Groups[self.GroupName].Template.route and _DATABASE.Templates.Groups[self.GroupName].Template.route.points then
+    return UTILS.DeepCopy( _DATABASE.Templates.Groups[self.GroupName].Template.route.points )
+  else
+    return {}
+  end
 end
 
 --- Return the route of a group by using the global _DATABASE object (an instance of @{Core.Database#DATABASE}).
@@ -2754,7 +2816,7 @@ do -- Event Handling
 
     self:EventDispatcher():Reset( self )
 
-    for UnitID, UnitData in pairs( self:GetUnits() ) do
+    for UnitID, UnitData in pairs( self:GetUnits() or {}) do
       UnitData:ResetEvents()
     end
 
@@ -2960,7 +3022,7 @@ end
 --            local callsign = mygroup:GetCustomCallSign(true,false,nil,function(groupname,playername) return string.match(playername,"([%a]+)$") end)
 -- 
 function GROUP:GetCustomCallSign(ShortCallsign,Keepnumber,CallsignTranslations,CustomFunction,...)
-  --self:I("GetCustomCallSign")
+  self:T("GetCustomCallSign")
 
   local callsign = "Ghost 1"
   if self:IsAlive() then
@@ -2973,8 +3035,12 @@ function GROUP:GetCustomCallSign(ShortCallsign,Keepnumber,CallsignTranslations,C
     local callnumbermajor = string.char(string.byte(callnumber,1)) -- 9
     local callnumberminor = string.char(string.byte(callnumber,2)) -- 1
     local personalized = false
-    local playername = IsPlayer == true and self:GetPlayerName() or shortcallsign
+    --local playername = IsPlayer == true and self:GetPlayerName() or shortcallsign
+    local playername = shortcallsign
     
+    if IsPlayer then playername = self:GetPlayerName() end
+    
+    self:T2("GetCustomCallSign outcome = "..playername)
     if CustomFunction and IsPlayer then
       local arguments = arg or {}
       local callsign = CustomFunction(groupname,playername,unpack(arguments))
@@ -3094,7 +3160,7 @@ function GROUP:IsSAM()
   local units = self:GetUnits()
   for _,_unit in pairs(units or {}) do
     local unit = _unit -- Wrapper.Unit#UNIT
-    if unit:HasSEAD() and unit:IsGround() and (not unit:HasAttribute("Mobile AAA")) then
+    if unit:IsSAM() then
       issam = true
       break
     end
@@ -3104,18 +3170,16 @@ end
 
 --- [GROUND] Determine if a GROUP has a AAA unit, i.e. has no radar or optical tracker but the AAA = true or the "Mobile AAA" = true attribute.
 -- @param #GROUP self
--- @return #boolean IsSAM True if AAA, else false
+-- @return #boolean IsAAA True if AAA, else false
 function GROUP:IsAAA()
-  local issam = false
+  local isAAA = false
   local units = self:GetUnits()
   for _,_unit in pairs(units or {}) do
     local unit = _unit -- Wrapper.Unit#UNIT
-    local desc = unit:GetDesc() or {}
-    local attr = desc.attributes or {}
-    if unit:HasSEAD() then return false end
-    if attr["AAA"] or attr["SAM related"] then
-      issam = true
+    if unit:IsAAA() then
+      isAAA = true
+      break
     end
   end
-  return issam
+  return isAAA
 end

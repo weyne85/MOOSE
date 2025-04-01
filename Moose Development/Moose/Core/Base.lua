@@ -34,11 +34,12 @@ local _TraceClassMethod = {}
 
 local _ClassID = 0
 
----
+--- Base class of everything
 -- @type BASE
--- @field ClassName The name of the class.
--- @field ClassID The ID number of the class.
--- @field ClassNameAndID The name of the class concatenated with the ID number of the class.
+-- @field #string ClassName The name of the class.
+-- @field #number ClassID The ID number of the class.
+-- @field #string ClassNameAndID The name of the class concatenated with the ID number of the class.
+-- @field Core.Scheduler#SCHEDULER Scheduler The scheduler object.
 
 --- BASE class
 --
@@ -200,6 +201,7 @@ BASE = {
   States = {},
   Debug = debug,
   Scheduler = nil,
+  Properties = {},
 }
 
 -- @field #BASE.__
@@ -208,14 +210,6 @@ BASE.__ = {}
 -- @field #BASE._
 BASE._ = {
   Schedules = {}, --- Contains the Schedulers Active
-}
-
---- The Formation Class
--- @type FORMATION
--- @field Cone A cone formation.
-FORMATION = {
-  Cone = "Cone",
-  Vee = "Vee",
 }
 
 --- BASE constructor.
@@ -1116,6 +1110,31 @@ function BASE:ClearState( Object, StateName )
   end
 end
 
+--- Set one property of an object.
+-- @param #BASE self
+-- @param Key The key that is used as a reference of the value. Note that the key can be a #string, but it can also be any other type!
+-- @param Value The value that is stored. Note that the value can be a #string, but it can also be any other type!
+function BASE:SetProperty(Key,Value)
+  self.Properties = self.Properties or {}
+  self.Properties[Key] = Value
+end
+            
+--- Get one property of an object by the key.
+-- @param #BASE self
+-- @param Key The key that is used as a reference of the value. Note that the key can be a #string, but it can also be any other type!
+-- @return Value The value that is stored. Note that the value can be a #string, but it can also be any other type! Nil if not found.         
+function BASE:GetProperty(Key)
+  self.Properties = self.Properties or {}
+  return self.Properties[Key]
+end
+
+--- Get all of the properties of an object in a table.
+-- @param #BASE self
+-- @return #table of values, indexed by keys.
+function BASE:GetProperties()
+  return self.Properties
+end
+            
 -- Trace section
 
 -- Log a trace (only shown when trace is on)
@@ -1447,4 +1466,3 @@ function BASE:I( Arguments )
   end
 
 end
-

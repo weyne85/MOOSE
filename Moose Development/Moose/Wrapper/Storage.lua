@@ -26,6 +26,7 @@
 -- @field #string lid Class id string for output to DCS log file.
 -- @field DCS#Warehouse warehouse The DCS warehouse object.
 -- @field DCS#Airbase airbase The DCS airbase object.
+-- @field Core.Timer#TIMER SaverTimer The TIMER for autosave.
 -- @extends Core.Base#BASE
 
 --- *The capitalist cannot store labour-power in warehouses after he has bought it, as he may do with the raw material.* -- Karl Marx
@@ -127,6 +128,35 @@
 -- # Weapons Helper Enumerater
 -- 
 -- The currently available weapon items are available in the `ENUMS.Storage.weapons`, e.g. `ENUMS.Storage.weapons.bombs.Mk_82Y`.
+-- 
+-- # Persistence
+-- 
+-- The contents of the storage can be saved to and read from disk. For this to function, `io` and `lfs` need to be desanitized in `MissionScripting.lua`.
+-- 
+-- ## Save once
+-- 
+-- ### To save once, e.g. this is sufficient:
+--    
+--      -- Filenames created are the Filename given amended by "_Liquids", "_Aircraft" and "_Weapons" followed by a ".csv". Only Storage NOT set to unlimited will be saved.
+--      local Path = "C:\\Users\\UserName\\Saved Games\\DCS\\Missions\\"
+--      local Filename = "Batumi"
+--      storage:SaveToFile(Path,Filename)
+--    
+-- ### Autosave
+-- 
+--      storage:StartAutoSave(Path,Filename,300,true) -- save every 300 secs/5 mins starting in 5 mins, load the existing storage - if any - first if the last parameter is **not** `false`.
+-- 
+-- ### Stop Autosave
+-- 
+--      storage:StopAutoSave() -- stop the scheduler.
+--    
+-- ### Load back with e.g.
+-- 
+--      -- Filenames searched for the Filename given amended by "_Liquids", "_Aircraft" and "_Weapons" followed by a ".csv". Only Storage NOT set to unlimited will be loaded.
+--      local Path = "C:\\Users\\UserName\\Saved Games\\DCS\\Missions\\"
+--      local Filename = "Batumi"
+--      storage:LoadFromFile(Path,Filename)
+--    
 --
 -- @field #STORAGE
 STORAGE = {
@@ -173,14 +203,14 @@ STORAGE.Type = {
 
 --- STORAGE class version.
 -- @field #string version
-STORAGE.version="0.0.3"
+STORAGE.version="0.1.5"
 
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- TODO list
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 -- TODO: A lot...
--- TODO: Persistence
+-- DONE: Persistence
 
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- Constructor
@@ -197,11 +227,11 @@ function STORAGE:New(AirbaseName)
 
   self.airbase=Airbase.getByName(AirbaseName)
 
-  if Airbase.getWarehouse then
+  if Airbase.getWarehouse and self.airbase then
     self.warehouse=self.airbase:getWarehouse()
   end
 
-  self.lid = string.format("STORAGE %s", AirbaseName)
+  self.lid = string.format("STORAGE %s | ", AirbaseName)
 
   return self
 end
@@ -221,12 +251,12 @@ function STORAGE:NewFromStaticCargo(StaticCargoName)
     self.warehouse=Warehouse.getCargoAsWarehouse(self.airbase)
   end
 
-  self.lid = string.format("STORAGE %s", StaticCargoName)
+  self.lid = string.format("STORAGE %s | ", StaticCargoName)
 
   return self
 end
 
---- Create a new STORAGE object from an DCS static cargo object.
+--- Create a new STORAGE object from a Wrapper.DynamicCargo#DYNAMICCARGO object.
 -- @param #STORAGE self
 -- @param #string DynamicCargoName Unit name of the dynamic cargo.
 -- @return #STORAGE self
@@ -235,13 +265,13 @@ function STORAGE:NewFromDynamicCargo(DynamicCargoName)
   -- Inherit everything from BASE class.
   local self=BASE:Inherit(self, BASE:New()) -- #STORAGE
 
-  self.airbase=Unit.getByName(DynamicCargoName)
+  self.airbase=Unit.getByName(DynamicCargoName) or StaticObject.getByName(DynamicCargoName)
 
   if Airbase.getWarehouse then
     self.warehouse=Warehouse.getCargoAsWarehouse(self.airbase)
   end
 
-  self.lid = string.format("STORAGE %s", DynamicCargoName)
+  self.lid = string.format("STORAGE %s | ", DynamicCargoName)
 
   return self
 end
@@ -266,6 +296,10 @@ end
 -- @return #STORAGE self
 function STORAGE:SetVerbosity(VerbosityLevel)
   self.verbose=VerbosityLevel or 0
+  if self.verbose > 1 then
+    BASE:TraceOn()
+    BASE:TraceClass("STORAGE")
+  end
   return self
 end
 
@@ -499,7 +533,7 @@ function STORAGE:IsUnlimited(Type)
     end
 
     -- Debug info.
-    self:I(self.lid..string.format("Type=%s: unlimited=%s (N=%d n=%d)", tostring(Type), tostring(unlimited), N, n))
+    self:T(self.lid..string.format("Type=%s: unlimited=%s (N=%d n=%d)", tostring(Type), tostring(unlimited), N, n))
   end
 
   return unlimited
@@ -594,6 +628,247 @@ function STORAGE:GetInventory(Item)
 
   return inventory.aircraft, inventory.liquids, inventory.weapon
 end
+
+--- Save the contents of a STORAGE to files in CSV format. Filenames created are the Filename given amended by "_Liquids", "_Aircraft" and "_Weapons" followed by a ".csv". Requires io and lfs to be desanitized to be working.
+-- @param #STORAGE self
+-- @param #string Path The path to use. Use double backslashes \\\\ on Windows filesystems.
+-- @param #string Filename The base name of the files. Existing files will be overwritten.
+-- @return #STORAGE self
+function STORAGE:SaveToFile(Path,Filename)
+
+    if not io then
+      BASE:E("ERROR: io not desanitized. Can't save the files.")
+      return false
+    end
+  
+    -- Check default path.
+    if Path==nil and not lfs then
+      BASE:E("WARNING: lfs not desanitized. File will be saved in DCS installation root directory rather than your given path.")
+    end
+    
+    local ac, lq, wp = self:GetInventory()
+    local DataAircraft = ""
+    local DataLiquids = ""
+    local DataWeapons = ""
+    
+    if #lq > 0 then
+      DataLiquids = DataLiquids .."Liquids in Storage:\n"
+      for key,amount in pairs(lq) do
+        DataLiquids = DataLiquids..tostring(key).."="..tostring(amount).."\n"
+      end
+      UTILS.SaveToFile(Path,Filename.."_Liquids.csv",DataLiquids)
+      if self.verbose and self.verbose > 0 then
+        self:I(self.lid.."Saving Liquids to "..tostring(Path).."\\"..tostring(Filename).."_Liquids.csv")
+      end
+    end
+    
+    if UTILS.TableLength(ac) > 0 then
+      DataAircraft = DataAircraft .."Aircraft in Storage:\n"
+      for key,amount in pairs(ac) do
+        DataAircraft = DataAircraft..tostring(key).."="..tostring(amount).."\n"
+      end
+      UTILS.SaveToFile(Path,Filename.."_Aircraft.csv",DataAircraft)
+      if self.verbose and self.verbose > 0 then
+        self:I(self.lid.."Saving Aircraft to "..tostring(Path).."\\"..tostring(Filename).."_Aircraft.csv")
+      end
+    end
+    
+    if UTILS.TableLength(wp) > 0 then
+      DataWeapons = DataWeapons .."Weapons and Materiel in Storage:\n"
+
+      for _,_category in pairs(ENUMS.Storage.weapons) do
+        for _,_key in pairs(_category) do
+          local amount = self:GetAmount(_key)
+          if type(_key) == "table" then
+            _key = "{"..table.concat(_key,",").."}"
+          end
+          DataWeapons = DataWeapons..tostring(_key).."="..tostring(amount).."\n"
+        end
+      end
+
+      -- Gazelle table keys
+      for key,amount in pairs(ENUMS.Storage.weapons.Gazelle) do
+        amount = self:GetItemAmount(ENUMS.Storage.weapons.Gazelle[key])
+        DataWeapons = DataWeapons.."ENUMS.Storage.weapons.Gazelle."..tostring(key).."="..tostring(amount).."\n"
+      end
+      -- CH47
+      for key,amount in pairs(ENUMS.Storage.weapons.CH47) do
+        amount = self:GetItemAmount(ENUMS.Storage.weapons.CH47[key])
+        DataWeapons = DataWeapons.."ENUMS.Storage.weapons.CH47."..tostring(key).."="..tostring(amount).."\n"
+      end
+      -- UH1H
+      for key,amount in pairs(ENUMS.Storage.weapons.UH1H) do
+        amount = self:GetItemAmount(ENUMS.Storage.weapons.UH1H[key])
+        DataWeapons = DataWeapons.."ENUMS.Storage.weapons.UH1H."..tostring(key).."="..tostring(amount).."\n"
+      end
+      -- OH58D
+      for key,amount in pairs(ENUMS.Storage.weapons.OH58) do
+        amount = self:GetItemAmount(ENUMS.Storage.weapons.OH58[key])
+        DataWeapons = DataWeapons.."ENUMS.Storage.weapons.OH58."..tostring(key).."="..tostring(amount).."\n"
+      end
+      -- AH64D
+      for key,amount in pairs(ENUMS.Storage.weapons.AH64D) do
+        amount = self:GetItemAmount(ENUMS.Storage.weapons.AH64D[key])
+        DataWeapons = DataWeapons.."ENUMS.Storage.weapons.AH64D."..tostring(key).."="..tostring(amount).."\n"
+      end
+       UTILS.SaveToFile(Path,Filename.."_Weapons.csv",DataWeapons)
+       if self.verbose and self.verbose > 0 then
+         self:I(self.lid.."Saving Weapons to "..tostring(Path).."\\"..tostring(Filename).."_Weapons.csv")
+       end
+    end
+
+  return self
+end
+
+--- Load the contents of a STORAGE from files. Filenames searched for are the Filename given amended by "_Liquids", "_Aircraft" and "_Weapons" followed by a ".csv". Requires io and lfs to be desanitized to be working.
+-- @param #STORAGE self
+-- @param #string Path The path to use. Use double backslashes \\\\ on Windows filesystems.
+-- @param #string Filename The name of the file.
+-- @return #STORAGE self
+function STORAGE:LoadFromFile(Path,Filename)
+ 
+ if not io then
+      BASE:E("ERROR: io not desanitized. Can't read the files.")
+    return false
+  end
+  
+  -- Check default path.
+  if Path==nil and not lfs then
+    BASE:E("WARNING: lfs not desanitized. File will be read from DCS installation root directory rather than your give path.")
+  end
+  
+  --Liquids
+  if self:IsLimitedLiquids() then
+    local Ok,Liquids = UTILS.LoadFromFile(Path,Filename.."_Liquids.csv")
+    if Ok then
+       if self.verbose and self.verbose > 0 then
+         self:I(self.lid.."Loading Liquids from "..tostring(Path).."\\"..tostring(Filename).."_Liquids.csv")
+       end
+      for _id,_line in pairs(Liquids) do
+        if string.find(_line,"Storage") == nil then
+            local tbl=UTILS.Split(_line,"=")
+            local lqno = tonumber(tbl[1])
+            local lqam = tonumber(tbl[2])
+            self:SetLiquid(lqno,lqam)
+        end
+      end
+    else
+        self:E("File for Liquids could not be found: "..tostring(Path).."\\"..tostring(Filename"_Liquids.csv"))
+    end
+  end
+  
+  --Aircraft
+  if self:IsLimitedAircraft() then
+    local Ok,Aircraft = UTILS.LoadFromFile(Path,Filename.."_Aircraft.csv")
+    if Ok then
+       if self.verbose and self.verbose > 0 then
+         self:I(self.lid.."Loading Aircraft from "..tostring(Path).."\\"..tostring(Filename).."_Aircraft.csv")
+       end
+      for _id,_line in pairs(Aircraft) do
+        if string.find(_line,"Storage") == nil then
+            local tbl=UTILS.Split(_line,"=")
+            local acname = tbl[1]
+            local acnumber = tonumber(tbl[2])
+            self:SetAmount(acname,acnumber)
+        end
+      end
+    else
+        self:E("File for Aircraft could not be found: "..tostring(Path).."\\"..tostring(Filename"_Aircraft.csv"))
+    end
+  end
+  
+  --Weapons
+  if self:IsLimitedWeapons() then
+    local Ok,Weapons = UTILS.LoadFromFile(Path,Filename.."_Weapons.csv")
+    if Ok then
+       if self.verbose and self.verbose > 0 then
+         self:I(self.lid.."Loading Weapons from "..tostring(Path).."\\"..tostring(Filename).."_Weapons.csv")
+       end
+      for _id,_line in pairs(Weapons) do
+        if string.find(_line,"Storage") == nil then
+            local tbl=UTILS.Split(_line,"=")
+            local wpname = tbl[1]
+            local wpnumber = tonumber(tbl[2])
+            if string.find(wpname,"{") == 1 then
+             --self:I("Found a table: "..wpname)
+             wpname = string.gsub(wpname,"{","")
+             wpname = string.gsub(wpname,"}","")
+             local tbl = UTILS.Split(wpname,",")
+             local wptbl = {}
+             for _id,_key in ipairs(tbl) do
+                table.insert(wptbl,_id,_key)
+             end
+             self:SetAmount(wptbl,wpnumber)  
+            else
+             self:SetAmount(wpname,wpnumber)
+            end
+        end
+      end
+    else
+        self:E("File for Weapons could not be found: "..tostring(Path).."\\"..tostring(Filename"_Weapons.csv"))
+    end
+  end
+   
+  return self
+end
+
+--- Start a STORAGE autosave process.
+-- @param #STORAGE self
+-- @param #string Path The path to use. Use double backslashes \\\\ on Windows filesystems.
+-- @param #string Filename The name of the file.
+-- @param #number Interval The interval, start after this many seconds and repeat every interval seconds. Defaults to 300.
+-- @param #boolean LoadOnce If LoadOnce is true or nil, we try to load saved storage first.
+-- @return #STORAGE self
+function STORAGE:StartAutoSave(Path,Filename,Interval,LoadOnce)
+  if LoadOnce ~= false then
+    self:LoadFromFile(Path,Filename)
+  end
+  local interval = Interval or 300
+  self.SaverTimer = TIMER:New(STORAGE.SaveToFile,self,Path,Filename)
+  self.SaverTimer:Start(interval,interval)
+  return self
+end
+
+--- Stop a running STORAGE autosave process.
+-- @param #STORAGE self
+-- @return #STORAGE self
+function STORAGE:StopAutoSave()
+  if self.SaverTimer and self.SaverTimer:IsRunning() then
+    self.SaverTimer:Stop()
+    self.SaverTimer = nil
+  end
+  return self
+end
+
+--- Try to find the #STORAGE object of one of the many "H"-Helipads in Syria. You need to put a (small, round) zone on top of it, because the name is not unique(!).
+-- @param #STORAGE self
+-- @param #string ZoneName The name of the zone where to find the helipad.
+-- @return #STORAGE self or nil if not found.
+function STORAGE:FindSyriaHHelipadWarehouse(ZoneName)
+ local findzone = ZONE:New(ZoneName)
+ local base = world.getAirbases()
+ for i = 1, #base do
+   local info = {}
+   --info.desc = Airbase.getDesc(base[i])
+   info.callsign = Airbase.getCallsign(base[i])
+   info.id = Airbase.getID(base[i])
+   --info.cat = Airbase.getCategory(base[i])
+   info.point = Airbase.getPoint(base[i])
+   info.coordinate = COORDINATE:NewFromVec3(info.point)
+   info.DCSObject = base[i]
+   --if Airbase.getUnit(base[i]) then
+       --info.unitId = Airbase.getUnit(base[i]):getID()
+   --end
+   if info.callsign == "H" and findzone:IsCoordinateInZone(info.coordinate) then
+    info.warehouse = info.DCSObject:getWarehouse()
+    info.Storage = STORAGE:New(info.callsign..info.id)
+    info.Storage.airbase = info.DCSObject
+    info.Storage.warehouse = info.warehouse         
+    return info.Storage
+   end
+ end
+end
+
 
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- Private Functions
