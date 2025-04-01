@@ -1,22 +1,3 @@
----@diagnostic disable: need-check-nil
-----------------------------------------------------------------------------------------
----
--- Name: BOS-100 - Stennis Hornet and Tomcat
--- Author: funkyfranky
--- Date Created: 17 August 2019
---
--- # Situation:
--- 
--- Practice Case I/II/III recovery using the F/A-18C Hornet or F-14B Tomcat.
--- 
--- See mission briefing for further details.
--- 
--- *** IMPORTANT ***
--- If you run the mission in single player, hit ESC twice before entering a slot!
--- Otherwise the script will not load due to a long standing DCS bug.
---
-----------------------------------------------------------------------------------------
-
 -- No MOOSE settings menu. Comment out this line if required.
 _SETTINGS:SetPlayerMenuOff()
 
@@ -52,9 +33,9 @@ local AirbossStennis=AIRBOSS:New("USS Stennis")
 -- Case I from 9 to 10 am.
 local window1=AirbossStennis:AddRecoveryWindow( "9:00", "10:00", 1, nil, true, 25)
 -- Case II with +15 degrees holding offset from 15:00 for 60 min.
-local window2=AirbossStennis:AddRecoveryWindow("15:00", "16:00", 2,  15, true, 23)
+local window2=AirbossStennis:AddRecoveryWindow("15:00", "16:00", 2, nil, true, 23)
 -- Case III with +30 degrees holding offset from 2100 to 2200.
-local window3=AirbossStennis:AddRecoveryWindow("21:00", "22:00", 3,  30, true, 21)
+local window3=AirbossStennis:AddRecoveryWindow("21:00", "22:00", 3, nil, true, 21)
 
 -- Set folder of airboss sound files within miz file.
 AirbossStennis:SetSoundfilesFolder("Airboss Soundfiles/")
