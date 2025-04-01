@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global
 --- GLOBALS: The order of the declarations is important here. Don't touch it.
 
 --- Declare the event dispatcher based on the EVENT class

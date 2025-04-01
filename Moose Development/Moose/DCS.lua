@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-doc-name
 --- **DCS API** Prototypes.
 -- 
 -- ===

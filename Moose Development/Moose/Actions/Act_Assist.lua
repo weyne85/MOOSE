@@ -1,3 +1,4 @@
+---@diagnostic disable: duplicate-set-field, undefined-doc-param
 --- (SP) (MP) (FSM) Route AI or players through waypoints or to zones.
 --
 -- ## ACT_ASSIST state machine:
